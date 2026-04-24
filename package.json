@@ -1,0 +1,20 @@
+{
+  "name": "stock-chart-tool-functions",
+  "version": "1.0.0",
+  "description": "Azure Functions — hourly stock data fetcher",
+  "main": "dist/src/functions/*.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start": "npm run build && func start",
+    "dev": "tsc -w & func start --verbose"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "@supabase/supabase-js": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
