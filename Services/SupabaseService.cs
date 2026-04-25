@@ -1,50 +1,124 @@
-using System.Text;
+using System.Net.Http.Json;
 using System.Text.Json;
-using Dapper;
-using Npgsql;
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using StockChartFunctions.Models;
 
 namespace StockChartFunctions.Services;
 
-public class SupabaseService
+public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<SupabaseService> logger)
 {
-    private readonly string _connectionString;
+    private readonly string _url = Environment.GetEnvironmentVariable("SUPABASE_URL")!;
+    private readonly string _key = Environment.GetEnvironmentVariable("SUPABASE_SERVICE_KEY")!;
 
-    public SupabaseService()
+    private static readonly JsonSerializerOptions _json = new()
     {
-        // Supabase connection string format:
-        // Host=db.<ref>.supabase.co;Port=5432;Database=postgres;Username=postgres;Password=<db-password>;SSL Mode=Require
-        _connectionString = Environment.GetEnvironmentVariable("SUPABASE_DB_CONNECTION")!;
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
+
+    private HttpClient CreateClient()
+    {
+        var client = httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("apikey", _key);
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_key}");
+        return client;
     }
 
-    public async Task SavePriceCacheAsync(string symbol, string timeframe, IEnumerable<PriceBar> bars)
+    public async Task<DateOnly?> GetLatestBarDateAsync(string symbol)
     {
-        var json = JsonSerializer.Serialize(bars);
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO price_cache (symbol, timeframe, bars, cached_at)
-            VALUES (@symbol, @timeframe, @bars::jsonb, NOW())
-            ON CONFLICT (symbol, timeframe) DO UPDATE
-              SET bars = EXCLUDED.bars, cached_at = EXCLUDED.cached_at
-            """,
-            new { symbol = symbol.ToUpper(), timeframe, bars = json });
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/price_bars?symbol=eq.{symbol.ToUpper()}&select=ts&order=ts.desc&limit=1";
+        var rows = await client.GetFromJsonAsync<List<TsRow>>(url, _json);
+        if (rows == null || rows.Count == 0) return null;
+        return DateOnly.Parse(rows[0].Ts);
+    }
+
+    public async Task SavePriceBarsAsync(string symbol, List<PriceBar> bars)
+    {
+        if (bars.Count == 0) return;
+
+        var sym = symbol.ToUpper();
+        var rows = bars.Select(b => new
+        {
+            symbol = sym,
+            ts     = b.Ts.ToString("yyyy-MM-dd"),
+            open   = b.Open,
+            high   = b.High,
+            low    = b.Low,
+            close  = b.Close,
+            volume = b.Volume
+        }).ToList();
+
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "resolution=merge-duplicates");
+
+        var url = $"{_url}/rest/v1/price_bars";
+        var response = await client.PostAsJsonAsync(url, rows);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            logger.LogError("SavePriceBars failed for {Symbol}: {Status} {Body}", symbol, response.StatusCode, body);
+            response.EnsureSuccessStatusCode();
+        }
+    }
+
+    public async Task<List<string>> GetSymbolsAsync()
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/analyst_cache?select=symbol&order=symbol";
+        var rows = await client.GetFromJsonAsync<List<SymbolRow>>(url, _json);
+        return rows?.Select(r => r.Symbol).ToList() ?? [];
+    }
+
+    public async Task<List<SymbolStat>> GetSymbolStatsAsync()
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/rpc/get_symbol_stats";
+        var rows = await client.PostAsJsonAsync(url, new { });
+        var stats = await rows.Content.ReadFromJsonAsync<List<SymbolStatRow>>(_json);
+        return stats?.Select(r => new SymbolStat(r.Symbol, r.BarCount, r.FromDate, r.ToDate, r.HasAnalyst)).ToList() ?? [];
+    }
+
+    public async Task<bool> IsAnalystDataFreshAsync(string symbol)
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/analyst_cache?symbol=eq.{symbol.ToUpper()}&select=cached_at";
+        var rows = await client.GetFromJsonAsync<List<CachedAtRow>>(url, _json);
+        if (rows == null || rows.Count == 0) return false;
+        var cachedAt = DateTime.Parse(rows[0].CachedAt, null, System.Globalization.DateTimeStyles.RoundtripKind);
+        return (DateTime.UtcNow - cachedAt).TotalHours < 23;
     }
 
     public async Task SaveAnalystCacheAsync(string symbol, AnalystData data)
     {
-        var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
+        var row = new
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO analyst_cache (symbol, data, cached_at)
-            VALUES (@symbol, @data::jsonb, NOW())
-            ON CONFLICT (symbol) DO UPDATE
-              SET data = EXCLUDED.data, cached_at = EXCLUDED.cached_at
-            """,
-            new { symbol = symbol.ToUpper(), data = json });
+            symbol    = symbol.ToUpper(),
+            data      = data,
+            cached_at = DateTime.UtcNow.ToString("o")
+        };
+
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "resolution=merge-duplicates");
+
+        var url = $"{_url}/rest/v1/analyst_cache";
+        var response = await client.PostAsJsonAsync(url, row, _json);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            logger.LogError("SaveAnalystCache failed for {Symbol}: {Status} {Body}", symbol, response.StatusCode, body);
+            response.EnsureSuccessStatusCode();
+        }
     }
+
+    private record TsRow(string Ts);
+    private record SymbolRow(string Symbol);
+    private record CachedAtRow([property: JsonPropertyName("cached_at")] string CachedAt);
+    private record SymbolStatRow(
+        string Symbol,
+        [property: JsonPropertyName("bar_count")]  long BarCount,
+        [property: JsonPropertyName("from_date")]  string FromDate,
+        [property: JsonPropertyName("to_date")]    string ToDate,
+        [property: JsonPropertyName("has_analyst")] bool HasAnalyst);
 }

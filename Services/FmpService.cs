@@ -9,6 +9,30 @@ public class FmpService(IHttpClientFactory httpClientFactory)
     private readonly HttpClient _http = httpClientFactory.CreateClient();
     private readonly string _apiKey = Environment.GetEnvironmentVariable("FMP_API_KEY") ?? "";
 
+    public async Task<List<PriceBar>> GetBarsAsync(string symbol, string from, string to)
+    {
+        if (string.IsNullOrEmpty(_apiKey)) return [];
+
+        var url = $"https://financialmodelingprep.com/stable/historical-price-eod/full?symbol={symbol}&from={from}&to={to}&apikey={_apiKey}";
+        var res = await _http.GetAsync(url);
+        if (!res.IsSuccessStatusCode) return [];
+
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        if (json.ValueKind != JsonValueKind.Array) return [];
+
+        return json.EnumerateArray()
+            .Select(r => new PriceBar(
+                Ts:     DateOnly.Parse(r.GetProperty("date").GetString()!),
+                Open:   r.GetProperty("open").GetDouble(),
+                High:   r.GetProperty("high").GetDouble(),
+                Low:    r.GetProperty("low").GetDouble(),
+                Close:  r.GetProperty("close").GetDouble(),
+                Volume: (long)r.GetProperty("volume").GetDouble()
+            ))
+            .OrderBy(b => b.Ts)
+            .ToList();
+    }
+
     public async Task<PriceTarget?> GetPriceTargetAsync(string symbol)
     {
         if (string.IsNullOrEmpty(_apiKey)) return null;

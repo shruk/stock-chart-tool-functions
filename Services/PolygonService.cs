@@ -1,32 +1,53 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using StockChartFunctions.Models;
 
 namespace StockChartFunctions.Services;
 
-public class PolygonService(IHttpClientFactory httpClientFactory)
+public class PolygonService(IHttpClientFactory httpClientFactory, ILogger<PolygonService> logger)
 {
     private readonly HttpClient _http = httpClientFactory.CreateClient();
     private readonly string _apiKey = Environment.GetEnvironmentVariable("POLYGON_API_KEY")!;
 
     public async Task<List<PriceBar>> GetBarsAsync(string symbol, string from, string to)
     {
-        var url = $"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{from}/{to}" +
-                  $"?adjusted=true&sort=asc&limit=500&apiKey={_apiKey}";
+        var allBars = new List<PriceBar>();
+        string? url = $"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{from}/{to}" +
+                      $"?adjusted=true&sort=asc&limit=5000&apiKey={_apiKey}";
 
-        var res = await _http.GetAsync(url);
-        if (!res.IsSuccessStatusCode) return [];
+        while (url != null)
+        {
+            var res = await _http.GetAsync(url);
+            if (!res.IsSuccessStatusCode)
+            {
+                logger.LogError("Polygon API error for {Symbol}: {Status}", symbol, res.StatusCode);
+                break;
+            }
 
-        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
-        var results = json.GetProperty("results");
+            var json = await res.Content.ReadFromJsonAsync<JsonElement>();
 
-        return results.EnumerateArray().Select(r => new PriceBar(
-            Time:   r.GetProperty("t").GetInt64() / 1000,
-            Open:   r.GetProperty("o").GetDouble(),
-            High:   r.GetProperty("h").GetDouble(),
-            Low:    r.GetProperty("l").GetDouble(),
-            Close:  r.GetProperty("c").GetDouble(),
-            Volume: r.GetProperty("v").GetDouble()
-        )).ToList();
+            if (json.TryGetProperty("results", out var results))
+            {
+                allBars.AddRange(results.EnumerateArray().Select(r => new PriceBar(
+                    Ts:     DateOnly.FromDateTime(
+                                DateTimeOffset.FromUnixTimeMilliseconds(r.GetProperty("t").GetInt64()).UtcDateTime),
+                    Open:   r.GetProperty("o").GetDouble(),
+                    High:   r.GetProperty("h").GetDouble(),
+                    Low:    r.GetProperty("l").GetDouble(),
+                    Close:  r.GetProperty("c").GetDouble(),
+                    Volume: (long)r.GetProperty("v").GetDouble()
+                )));
+            }
+
+            // Follow pagination if more results exist
+            url = json.TryGetProperty("next_url", out var next) && next.ValueKind != JsonValueKind.Null
+                ? $"{next.GetString()}&apiKey={_apiKey}"
+                : null;
+
+            if (url != null) await Task.Delay(250);
+        }
+
+        return allBars;
     }
 }

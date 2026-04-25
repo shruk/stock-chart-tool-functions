@@ -1,6 +1,6 @@
 namespace StockChartFunctions.Models;
 
-public record PriceBar(long Time, double Open, double High, double Low, double Close, double Volume);
+public record PriceBar(DateOnly Ts, double Open, double High, double Low, double Close, long Volume);
 
 public record RecommendationTrend(int Buy, int Hold, string Period, int Sell, int StrongBuy, int StrongSell);
 
@@ -24,3 +24,5 @@ public record AnalystData(
     PriceTarget? PriceTarget,
     KeyMetrics? Metrics,
     CompanyProfile? Profile);
+
+public record SymbolStat(string Symbol, long BarCount, string FromDate, string ToDate, bool HasAnalyst);
