@@ -17,6 +17,11 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
 
+    private static readonly JsonSerializerOptions _camelJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private HttpClient CreateClient()
     {
         var client = httpClientFactory.CreateClient();
@@ -128,7 +133,7 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         var row = new
         {
             symbol    = symbol.ToUpper(),
-            data      = data,
+            data      = JsonSerializer.SerializeToElement(data, _camelJson),
             cached_at = DateTime.UtcNow.ToString("o")
         };
 
