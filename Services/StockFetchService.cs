@@ -53,9 +53,9 @@ public class StockFetchService(
         return bars.Count;
     }
 
-    public async Task RefreshAnalystAsync(string symbol)
+    public async Task RefreshAnalystAsync(string symbol, bool force = false)
     {
-        if (await supabase.IsAnalystDataFreshAsync(symbol))
+        if (!force && await supabase.IsAnalystDataFreshAsync(symbol))
         {
             logger.LogInformation("Analyst data for {Symbol} is fresh, skipping", symbol);
             return;

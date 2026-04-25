@@ -90,6 +90,39 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         return (DateTime.UtcNow - cachedAt).TotalHours < 23;
     }
 
+    public async Task AddSymbolAsync(string symbol)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "resolution=ignore-duplicates");
+        var url = $"{_url}/rest/v1/symbols";
+        await client.PostAsJsonAsync(url, new { symbol = symbol.ToUpper() });
+    }
+
+    public async Task DeleteDataAsync(string symbol)
+    {
+        var sym = symbol.ToUpper();
+        var client = CreateClient();
+
+        var priceRes = await client.DeleteAsync($"{_url}/rest/v1/price_bars?symbol=eq.{sym}");
+        if (!priceRes.IsSuccessStatusCode)
+            logger.LogError("DeleteData price_bars failed for {Symbol}: {Status}", sym, priceRes.StatusCode);
+
+        var analystRes = await client.DeleteAsync($"{_url}/rest/v1/analyst_cache?symbol=eq.{sym}");
+        if (!analystRes.IsSuccessStatusCode)
+            logger.LogError("DeleteData analyst_cache failed for {Symbol}: {Status}", sym, analystRes.StatusCode);
+    }
+
+    public async Task DeleteSymbolAsync(string symbol)
+    {
+        await DeleteDataAsync(symbol);
+
+        var sym = symbol.ToUpper();
+        var client = CreateClient();
+        var symbolRes = await client.DeleteAsync($"{_url}/rest/v1/symbols?symbol=eq.{sym}");
+        if (!symbolRes.IsSuccessStatusCode)
+            logger.LogError("DeleteSymbol symbols failed for {Symbol}: {Status}", sym, symbolRes.StatusCode);
+    }
+
     public async Task SaveAnalystCacheAsync(string symbol, AnalystData data)
     {
         var row = new
