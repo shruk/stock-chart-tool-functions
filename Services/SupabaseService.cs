@@ -150,9 +150,41 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         }
     }
 
+    public async Task<MarketSummaryResult?> GetLatestMarketSummaryAsync()
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/market_summary?select=content,content_zh&order=generated_at.desc&limit=1";
+        var rows = await client.GetFromJsonAsync<List<MarketSummaryRow>>(url, _json);
+        var row = rows?.FirstOrDefault();
+        if (row is null) return null;
+        return new MarketSummaryResult(row.Content, row.ContentZh);
+    }
+
+    public async Task SaveMarketSummaryAsync(string content, string? contentZh)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "return=minimal");
+        var url = $"{_url}/rest/v1/market_summary";
+        var response = await client.PostAsJsonAsync(url, new
+        {
+            content,
+            content_zh   = contentZh,
+            generated_at = DateTime.UtcNow.ToString("o")
+        });
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            logger.LogError("SaveMarketSummary failed: {Status} {Body}", response.StatusCode, body);
+        }
+    }
+
     private record TsRow(string Ts);
     private record SymbolRow(string Symbol);
     private record CachedAtRow([property: JsonPropertyName("cached_at")] string CachedAt);
+    private record MarketSummaryRow(
+        string Content,
+        [property: JsonPropertyName("content_zh")] string? ContentZh);
+    public record MarketSummaryResult(string Content, string? ContentZh);
     private record SymbolStatRow(
         string Symbol,
         [property: JsonPropertyName("bar_count")]  long BarCount,

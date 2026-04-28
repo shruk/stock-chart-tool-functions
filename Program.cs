@@ -21,6 +21,7 @@ var host = new HostBuilder()
         services.AddSingleton<FinnhubService>();
         services.AddSingleton<FmpService>();
         services.AddSingleton<StockFetchService>();
+        services.AddSingleton<ClaudeService>();
     })
     .Build();
 
