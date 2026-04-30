@@ -26,3 +26,11 @@ public record AnalystData(
     CompanyProfile? Profile);
 
 public record SymbolStat(string Symbol, long BarCount, string FromDate, string ToDate, bool HasAnalyst);
+
+public record RiskHorizon(double LossProbability, double VaR95);
+
+public record RiskResult(
+    RiskHorizon TwoWeek,
+    RiskHorizon OneMonth,
+    RiskHorizon ThreeMonth,
+    RiskHorizon SixMonth);

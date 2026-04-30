@@ -36,7 +36,7 @@ public class PolygonService(IHttpClientFactory httpClientFactory, ILogger<Polygo
                     High:   r.GetProperty("h").GetDouble(),
                     Low:    r.GetProperty("l").GetDouble(),
                     Close:  r.GetProperty("c").GetDouble(),
-                    Volume: (long)r.GetProperty("v").GetDouble()
+                    Volume: r.TryGetProperty("v", out var v) ? (long)v.GetDouble() : 0
                 )));
             }
 

@@ -178,6 +178,48 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         }
     }
 
+    public async Task<List<double>> GetClosePricesAsync(string symbol)
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/price_bars?symbol=eq.{symbol.ToUpper()}&select=close&order=ts.asc";
+        var rows = await client.GetFromJsonAsync<List<CloseRow>>(url, _json);
+        return rows?.Select(r => r.Close).ToList() ?? [];
+    }
+
+    public async Task SaveRiskResultAsync(string symbol, RiskResult r)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "resolution=merge-duplicates");
+        var url = $"{_url}/rest/v1/symbol_risk";
+        var response = await client.PostAsJsonAsync(url, new
+        {
+            symbol        = symbol.ToUpper(),
+            loss_prob_2w  = r.TwoWeek.LossProbability,
+            var95_2w      = r.TwoWeek.VaR95,
+            loss_prob_1m  = r.OneMonth.LossProbability,
+            var95_1m      = r.OneMonth.VaR95,
+            loss_prob_3m  = r.ThreeMonth.LossProbability,
+            var95_3m      = r.ThreeMonth.VaR95,
+            loss_prob_6m  = r.SixMonth.LossProbability,
+            var95_6m      = r.SixMonth.VaR95,
+            calculated_at = DateTime.UtcNow.ToString("o")
+        });
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            logger.LogError("SaveRiskResult failed for {Symbol}: {Status} {Body}", symbol, response.StatusCode, body);
+        }
+    }
+
+    public async Task<RiskRow?> GetRiskResultAsync(string symbol)
+    {
+        var client = CreateClient();
+        var cols = "loss_prob_2w,var95_2w,loss_prob_1m,var95_1m,loss_prob_3m,var95_3m,loss_prob_6m,var95_6m,calculated_at";
+        var url = $"{_url}/rest/v1/symbol_risk?symbol=eq.{symbol.ToUpper()}&select={cols}&limit=1";
+        var rows = await client.GetFromJsonAsync<List<RiskRow>>(url, _json);
+        return rows?.FirstOrDefault();
+    }
+
     private record TsRow(string Ts);
     private record SymbolRow(string Symbol);
     private record CachedAtRow([property: JsonPropertyName("cached_at")] string CachedAt);
@@ -185,6 +227,17 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         string Content,
         [property: JsonPropertyName("content_zh")] string? ContentZh);
     public record MarketSummaryResult(string Content, string? ContentZh);
+    private record CloseRow(double Close);
+    public record RiskRow(
+        [property: JsonPropertyName("loss_prob_2w")]  double LossProb2W,
+        [property: JsonPropertyName("var95_2w")]      double Var95_2W,
+        [property: JsonPropertyName("loss_prob_1m")]  double LossProb1M,
+        [property: JsonPropertyName("var95_1m")]      double Var95_1M,
+        [property: JsonPropertyName("loss_prob_3m")]  double LossProb3M,
+        [property: JsonPropertyName("var95_3m")]      double Var95_3M,
+        [property: JsonPropertyName("loss_prob_6m")]  double LossProb6M,
+        [property: JsonPropertyName("var95_6m")]      double Var95_6M,
+        [property: JsonPropertyName("calculated_at")] string CalculatedAt);
     private record SymbolStatRow(
         string Symbol,
         [property: JsonPropertyName("bar_count")]  long BarCount,
