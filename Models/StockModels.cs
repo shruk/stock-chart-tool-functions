@@ -23,9 +23,10 @@ public record AnalystData(
     RecommendationTrend? Recommendation,
     PriceTarget? PriceTarget,
     KeyMetrics? Metrics,
-    CompanyProfile? Profile);
+    CompanyProfile? Profile,
+    DateOnly? NextEarnings = null);
 
-public record SymbolStat(string Symbol, long BarCount, string FromDate, string ToDate, bool HasAnalyst);
+public record SymbolStat(string Symbol, long BarCount, string FromDate, string ToDate, bool HasAnalyst, string Type = "stock");
 
 public record RiskHorizon(double LossProbability, double VaR95);
 

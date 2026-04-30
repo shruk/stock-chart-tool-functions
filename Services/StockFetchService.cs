@@ -61,10 +61,13 @@ public class StockFetchService(
             return;
         }
 
-        var (rec, metrics, profile) = await finnhub.GetAnalystDataAsync(symbol);
-        var priceTarget = await fmp.GetPriceTargetAsync(symbol);
+        var analystTask      = finnhub.GetAnalystDataAsync(symbol);
+        var earningsTask     = finnhub.GetNextEarningsDateAsync(symbol);
+        var priceTargetTask  = fmp.GetPriceTargetAsync(symbol);
+        await Task.WhenAll(analystTask, earningsTask, priceTargetTask);
 
-        var data = new AnalystData(rec, priceTarget, metrics, profile);
+        var (rec, metrics, profile) = analystTask.Result;
+        var data = new AnalystData(rec, priceTargetTask.Result, metrics, profile, earningsTask.Result);
         await supabase.SaveAnalystCacheAsync(symbol, data);
         logger.LogInformation("✓ Analyst: {Symbol}", symbol);
     }

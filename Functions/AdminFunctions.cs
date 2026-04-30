@@ -21,6 +21,25 @@ public class AdminFunctions(
         return response;
     }
 
+    [Function("UpdateSymbolType")]
+    public async Task<HttpResponseData> UpdateSymbolType(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "symbols/{symbol}/type")] HttpRequestData req,
+        string symbol)
+    {
+        var body = await req.ReadFromJsonAsync<UpdateTypeRequest>();
+        if (string.IsNullOrWhiteSpace(body?.Type))
+        {
+            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+            await bad.WriteStringAsync("type is required");
+            return bad;
+        }
+        var sym = symbol.ToUpper().Trim();
+        await supabase.UpdateSymbolTypeAsync(sym, body.Type);
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { symbol = sym, type = body.Type });
+        return response;
+    }
+
     [Function("UpdateAnalyst")]
     public async Task<HttpResponseData> UpdateAnalyst(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "symbols/{symbol}/analyst")] HttpRequestData req,
@@ -129,3 +148,4 @@ public class AdminFunctions(
 }
 
 public record BackfillRequest(string Symbol);
+public record UpdateTypeRequest(string Type);

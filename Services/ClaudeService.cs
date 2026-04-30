@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using StockChartFunctions.Models;
 
 namespace StockChartFunctions.Services;
 
@@ -15,6 +16,19 @@ public class ClaudeService(IHttpClientFactory httpClientFactory, ILogger<ClaudeS
         Cover the general market sentiment, key macro factors (interest rates, inflation, economic outlook),
         and any notable sector trends. Write in a neutral, professional tone suitable for retail investors.
         Return only the paragraph, no headings or extra formatting.
+        """);
+
+    public Task<string?> GenerateRiskSummaryAsync(string symbol, RiskResult risk) => CallClaude($"""
+        You are a financial risk analyst. In 2-3 sentences, interpret these Monte Carlo risk metrics for {symbol} in plain English for a retail investor.
+
+        Risk metrics (probability of losing more than 5%, based on 1,000 simulations of historical volatility):
+        - 2-week:  {risk.TwoWeek.LossProbability:P0} loss probability, VaR95: {Math.Abs(risk.TwoWeek.VaR95):P1}
+        - 1-month: {risk.OneMonth.LossProbability:P0} loss probability, VaR95: {Math.Abs(risk.OneMonth.VaR95):P1}
+        - 3-month: {risk.ThreeMonth.LossProbability:P0} loss probability, VaR95: {Math.Abs(risk.ThreeMonth.VaR95):P1}
+        - 6-month: {risk.SixMonth.LossProbability:P0} loss probability, VaR95: {Math.Abs(risk.SixMonth.VaR95):P1}
+
+        Explain the overall risk level, how risk builds over longer horizons, and what this means practically for holding the stock.
+        Be concise. Avoid jargon. Return only the paragraph, no headings or bullet points.
         """);
 
     public Task<string?> GenerateMarketSummaryZhAsync() => CallClaude($"""

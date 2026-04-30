@@ -71,7 +71,7 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
     public async Task<List<string>> GetSymbolsAsync()
     {
         var client = CreateClient();
-        var url = $"{_url}/rest/v1/analyst_cache?select=symbol&order=symbol";
+        var url = $"{_url}/rest/v1/symbols?select=symbol&order=symbol";
         var rows = await client.GetFromJsonAsync<List<SymbolRow>>(url, _json);
         return rows?.Select(r => r.Symbol).ToList() ?? [];
     }
@@ -82,7 +82,7 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         var url = $"{_url}/rest/v1/rpc/get_symbol_stats";
         var rows = await client.PostAsJsonAsync(url, new { });
         var stats = await rows.Content.ReadFromJsonAsync<List<SymbolStatRow>>(_json);
-        return stats?.Select(r => new SymbolStat(r.Symbol, r.BarCount, r.FromDate, r.ToDate, r.HasAnalyst)).ToList() ?? [];
+        return stats?.Select(r => new SymbolStat(r.Symbol, r.BarCount, r.FromDate, r.ToDate, r.HasAnalyst, r.Type)).ToList() ?? [];
     }
 
     public async Task<bool> IsAnalystDataFreshAsync(string symbol)
@@ -101,6 +101,14 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         client.DefaultRequestHeaders.Add("Prefer", "resolution=ignore-duplicates");
         var url = $"{_url}/rest/v1/symbols";
         await client.PostAsJsonAsync(url, new { symbol = symbol.ToUpper() });
+    }
+
+    public async Task UpdateSymbolTypeAsync(string symbol, string type)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "return=minimal");
+        var url = $"{_url}/rest/v1/symbols?symbol=eq.{symbol.ToUpper()}";
+        await client.PatchAsJsonAsync(url, new { type });
     }
 
     public async Task DeleteDataAsync(string symbol)
@@ -132,9 +140,10 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
     {
         var row = new
         {
-            symbol    = symbol.ToUpper(),
-            data      = JsonSerializer.SerializeToElement(data, _camelJson),
-            cached_at = DateTime.UtcNow.ToString("o")
+            symbol        = symbol.ToUpper(),
+            data          = JsonSerializer.SerializeToElement(data, _camelJson),
+            cached_at     = DateTime.UtcNow.ToString("o"),
+            next_earnings = data.NextEarnings?.ToString("yyyy-MM-dd")
         };
 
         var client = CreateClient();
@@ -178,6 +187,22 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         }
     }
 
+    public async Task<JobStatusResult> GetJobStatusAsync()
+    {
+        var client = CreateClient();
+        var summaryTask = client.GetFromJsonAsync<List<GeneratedAtRow>>(
+            $"{_url}/rest/v1/market_summary?select=generated_at&order=generated_at.desc&limit=1", _json);
+        var riskTask = client.GetFromJsonAsync<List<RiskCalcAtRow>>(
+            $"{_url}/rest/v1/symbol_risk?select=calculated_at&order=calculated_at.desc&limit=1", _json);
+        var priceTask = client.GetFromJsonAsync<List<TsRow>>(
+            $"{_url}/rest/v1/price_bars?select=ts&order=ts.desc&limit=1", _json);
+        await Task.WhenAll(summaryTask, riskTask, priceTask);
+        return new JobStatusResult(
+            priceTask.Result?.FirstOrDefault()?.Ts,
+            summaryTask.Result?.FirstOrDefault()?.GeneratedAt,
+            riskTask.Result?.FirstOrDefault()?.CalculatedAt);
+    }
+
     public async Task<List<double>> GetClosePricesAsync(string symbol)
     {
         var client = CreateClient();
@@ -214,10 +239,17 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
     public async Task<RiskRow?> GetRiskResultAsync(string symbol)
     {
         var client = CreateClient();
-        var cols = "loss_prob_2w,var95_2w,loss_prob_1m,var95_1m,loss_prob_3m,var95_3m,loss_prob_6m,var95_6m,calculated_at";
-        var url = $"{_url}/rest/v1/symbol_risk?symbol=eq.{symbol.ToUpper()}&select={cols}&limit=1";
+        var url = $"{_url}/rest/v1/symbol_risk?symbol=eq.{symbol.ToUpper()}&select=*&limit=1";
         var rows = await client.GetFromJsonAsync<List<RiskRow>>(url, _json);
         return rows?.FirstOrDefault();
+    }
+
+    public async Task SaveRiskSummaryAsync(string symbol, string summary)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "return=minimal");
+        var url = $"{_url}/rest/v1/symbol_risk?symbol=eq.{symbol.ToUpper()}";
+        await client.PatchAsJsonAsync(url, new { risk_summary = summary });
     }
 
     private record TsRow(string Ts);
@@ -227,6 +259,9 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         string Content,
         [property: JsonPropertyName("content_zh")] string? ContentZh);
     public record MarketSummaryResult(string Content, string? ContentZh);
+    private record GeneratedAtRow([property: JsonPropertyName("generated_at")] string GeneratedAt);
+    private record RiskCalcAtRow([property: JsonPropertyName("calculated_at")] string CalculatedAt);
+    public record JobStatusResult(string? LatestPriceBarDate, string? LatestMarketSummaryAt, string? LatestRiskCalculatedAt);
     private record CloseRow(double Close);
     public record RiskRow(
         [property: JsonPropertyName("loss_prob_2w")]  double LossProb2W,
@@ -237,11 +272,13 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         [property: JsonPropertyName("var95_3m")]      double Var95_3M,
         [property: JsonPropertyName("loss_prob_6m")]  double LossProb6M,
         [property: JsonPropertyName("var95_6m")]      double Var95_6M,
-        [property: JsonPropertyName("calculated_at")] string CalculatedAt);
+        [property: JsonPropertyName("calculated_at")] string CalculatedAt,
+        [property: JsonPropertyName("risk_summary")]  string? RiskSummary = null);
     private record SymbolStatRow(
         string Symbol,
         [property: JsonPropertyName("bar_count")]  long BarCount,
         [property: JsonPropertyName("from_date")]  string FromDate,
         [property: JsonPropertyName("to_date")]    string ToDate,
-        [property: JsonPropertyName("has_analyst")] bool HasAnalyst);
+        [property: JsonPropertyName("has_analyst")] bool HasAnalyst,
+        string Type = "stock");
 }

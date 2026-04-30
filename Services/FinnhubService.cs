@@ -83,6 +83,19 @@ public class FinnhubService(IHttpClientFactory httpClientFactory)
             Ipo:                   GetString(p, "ipo") ?? "");
     }
 
+    public async Task<DateOnly?> GetNextEarningsDateAsync(string symbol)
+    {
+        if (string.IsNullOrEmpty(_apiKey)) return null;
+        var from = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var to   = DateTime.UtcNow.AddDays(180).ToString("yyyy-MM-dd");
+        var res  = await _http.GetAsync($"{Base}/calendar/earnings?symbol={symbol}&from={from}&to={to}&token={_apiKey}");
+        if (!res.IsSuccessStatusCode) return null;
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        if (!json.TryGetProperty("earningsCalendar", out var arr) || arr.GetArrayLength() == 0) return null;
+        var dateStr = GetString(arr[0], "date");
+        return dateStr != null && DateOnly.TryParse(dateStr, out var d) ? d : null;
+    }
+
     private static double? GetDouble(JsonElement el, string key) =>
         el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
 

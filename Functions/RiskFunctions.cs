@@ -9,7 +9,8 @@ namespace StockChartFunctions.Functions;
 public class RiskFunctions(
     ILogger<RiskFunctions> logger,
     SupabaseService supabase,
-    RiskCalculator calculator)
+    RiskCalculator calculator,
+    ClaudeService claude)
 {
     // Runs daily at 11 PM UTC (after market close + market summary)
     [Function("CalculateAllRisks")]
@@ -29,6 +30,11 @@ public class RiskFunctions(
 
             var result = calculator.CalculateRisk(prices);
             await supabase.SaveRiskResultAsync(symbol, result);
+
+            var summary = await claude.GenerateRiskSummaryAsync(symbol, result);
+            if (summary != null)
+                await supabase.SaveRiskSummaryAsync(symbol, summary);
+
             logger.LogInformation(
                 "{Symbol}: 2W={P2W:P1} | 1M={P1M:P1} | 3M={P3M:P1} | 6M={P6M:P1}",
                 symbol,
@@ -57,6 +63,7 @@ public class RiskFunctions(
                 threeMonth = new { lossProbability = risk.LossProb3M, var95 = risk.Var95_3M },
                 sixMonth   = new { lossProbability = risk.LossProb6M, var95 = risk.Var95_6M },
                 calculatedAt = risk.CalculatedAt,
+                aiSummary  = risk.RiskSummary,
             });
         }
         return response;
