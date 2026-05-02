@@ -252,6 +252,35 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
         await client.PatchAsJsonAsync(url, new { risk_summary = summary });
     }
 
+    public async Task SaveFullAnalysisAsync(string symbol, string analysis)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Prefer", "return=minimal");
+        var url = $"{_url}/rest/v1/symbol_risk?symbol=eq.{symbol.ToUpper()}";
+        await client.PatchAsJsonAsync(url, new
+        {
+            full_analysis    = analysis,
+            full_analysis_at = DateTime.UtcNow.ToString("o")
+        });
+    }
+
+    public async Task<double?> GetLatestCloseAsync(string symbol)
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/price_bars?symbol=eq.{symbol.ToUpper()}&select=close&order=ts.desc&limit=1";
+        var rows = await client.GetFromJsonAsync<List<CloseRow>>(url, _json);
+        return rows?.FirstOrDefault()?.Close;
+    }
+
+    public async Task<JsonElement?> GetAnalystCacheRawAsync(string symbol)
+    {
+        var client = CreateClient();
+        var url = $"{_url}/rest/v1/analyst_cache?symbol=eq.{symbol.ToUpper()}&select=data&limit=1";
+        var rows = await client.GetFromJsonAsync<List<AnalystCacheRow>>(url, _json);
+        return rows?.FirstOrDefault()?.Data;
+    }
+
+    private record AnalystCacheRow([property: JsonPropertyName("data")] JsonElement Data);
     private record TsRow(string Ts);
     private record SymbolRow(string Symbol);
     private record CachedAtRow([property: JsonPropertyName("cached_at")] string CachedAt);
@@ -264,16 +293,18 @@ public class SupabaseService(IHttpClientFactory httpClientFactory, ILogger<Supab
     public record JobStatusResult(string? LatestPriceBarDate, string? LatestMarketSummaryAt, string? LatestRiskCalculatedAt);
     private record CloseRow(double Close);
     public record RiskRow(
-        [property: JsonPropertyName("loss_prob_2w")]  double LossProb2W,
-        [property: JsonPropertyName("var95_2w")]      double Var95_2W,
-        [property: JsonPropertyName("loss_prob_1m")]  double LossProb1M,
-        [property: JsonPropertyName("var95_1m")]      double Var95_1M,
-        [property: JsonPropertyName("loss_prob_3m")]  double LossProb3M,
-        [property: JsonPropertyName("var95_3m")]      double Var95_3M,
-        [property: JsonPropertyName("loss_prob_6m")]  double LossProb6M,
-        [property: JsonPropertyName("var95_6m")]      double Var95_6M,
-        [property: JsonPropertyName("calculated_at")] string CalculatedAt,
-        [property: JsonPropertyName("risk_summary")]  string? RiskSummary = null);
+        [property: JsonPropertyName("loss_prob_2w")]     double LossProb2W,
+        [property: JsonPropertyName("var95_2w")]         double Var95_2W,
+        [property: JsonPropertyName("loss_prob_1m")]     double LossProb1M,
+        [property: JsonPropertyName("var95_1m")]         double Var95_1M,
+        [property: JsonPropertyName("loss_prob_3m")]     double LossProb3M,
+        [property: JsonPropertyName("var95_3m")]         double Var95_3M,
+        [property: JsonPropertyName("loss_prob_6m")]     double LossProb6M,
+        [property: JsonPropertyName("var95_6m")]         double Var95_6M,
+        [property: JsonPropertyName("calculated_at")]    string CalculatedAt,
+        [property: JsonPropertyName("risk_summary")]     string? RiskSummary = null,
+        [property: JsonPropertyName("full_analysis")]    string? FullAnalysis = null,
+        [property: JsonPropertyName("full_analysis_at")] string? FullAnalysisAt = null);
     private record SymbolStatRow(
         string Symbol,
         [property: JsonPropertyName("bar_count")]  long BarCount,
